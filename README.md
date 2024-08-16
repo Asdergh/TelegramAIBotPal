@@ -1,7 +1,8 @@
 This will you personal telegram bot powerd by AI. It will handle text, iamge and even audio generation to entertain you and make you more happier.
 Also in next versions it will be able to make image transfer, and image generation from your text reguests.
 
-![Alt text]()
+![brain_image](https://github.com/user-attachments/assets/214d99b9-8f9d-4c04-af72-bd1a536e2c06)
+
 Curent possibilities: 
   1. Emotino classification from text request
   2. Generate face image as a call for your text request considering emotion in your message
