@@ -6,22 +6,12 @@ import cv2
 
 from PIL import Image
 from matplotlib.animation import FuncAnimation
-from models.RNN import RNN
-from models.ConvVarAe import VarEncoder
+from models import VarEncoder
+from models import RNN
 from matplotlib.animation import FuncAnimation
 from telegram.ext import Application, filters, ContextTypes
 from telegram.ext import MessageHandler, CommandHandler
 from telegram import Update
-
-
-
-
-    
-
-    
-
-    
-
 
 class BotCore:
 
