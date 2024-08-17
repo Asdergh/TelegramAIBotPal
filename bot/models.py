@@ -15,35 +15,7 @@ from tensorflow.random import categorical
 from tensorflow import map_fn, expand_dims, convert_to_tensor
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.initializers import RandomNormal
-
-
-
-
-class ConvSequence(Layer):
-
-    def __init__(self, units, samples_n, sequence_l):
-
-        super(ConvSequence, self).__init__()
-        self.units = units
-        self.samples_n = samples_n
-        self.sequence_l = sequence_l
-    
-    def call(self, input_layer):
-        
-
-        sequence = input_layer[np.random.randint(0, input_layer.shape[0])]
-        for _ in range(1, self.samples_n):
-            
-            random_idx = np.random.randint(0, input_layer.shape[0])
-            random_coeff = np.random.normal(0, 1, sequence.shape[0])
-            sample = input_layer[random_idx]
-            sequence += sample * random_coeff
-        
-        lstm_layer = LSTM(units=self.units, return_sequences=True)(sequence)
-        return lstm_layer
-
-    def compute_output_shape(self):
-        return (None, None, self.units) 
+from layers import ConvSequence
     
 
 
@@ -746,7 +718,10 @@ class VarEncoder:
 
 
 
-
+# TODO _list: {
+#   1). write decoder sampling function
+#   2). write train process
+#}
 
 class RnnConv:
 
@@ -755,13 +730,15 @@ class RnnConv:
         self.params_json = params_json
         if self.params_json is None:
             self._load_params_(filepath=params_path)
-
+        
+        self.tokenizer = self.params_json["tokenizer"]
         self.encoder_layers_n = len(self.params_json["encoder_params"]["filters"])
         self.decoder_layers_n = len(self.params_json["decoder_params"]["units"])
 
         self._build_encoder_()
         self._build_decoder_()
         self._build_model_()
+        self.weights_init = RandomNormal(mean=self.params_json["weights_params"]["mean"], stddev=self.params_json["weights_params"]["stddev"])
     
     def _load_params_(self, filepath):
         
@@ -787,6 +764,7 @@ class RnnConv:
             conv_layer = Conv2D(filters=encoder_params["filters"][layer_n],
                                 kernel_size=encoder_params["kernel_size"][layer_n],
                                 strides=encoder_params["strides"][layer_n],
+                                kernel_initializer=self.weights_init,
                                 padding="same")(conv_layer)
             
             conv_layer = Activation(encoder_params["activations"][layer_n])(conv_layer)
@@ -798,14 +776,17 @@ class RnnConv:
         conv_layer = Conv2D(filters=1, kernel_size=3, strides=1)(conv_layer)
         conv_layer = Activation(encoder_params["output_activation"])(conv_layer)
 
-        output_layer = ConvSequence(units=self.params_json["decoder_params"]["units"][0], sequence_l=None, samples_n=100)(conv_layer)
+        output_layer = Flatten()(conv_layer)
+        output_layer = Dense(units=self.params_json["decoder_params"]["units"][0], activation="tanh")
+        output_layer = LSTM(units=self.params_json["decoder_params"]["units"][0])(output_layer)
+
         self.encoder = Model(inputs=input_layer, outputs=output_layer)
 
     def _build_decoder_(self):
         
         decoder_params = self.params_json["decoder_params"]
 
-        input_layer = Input(shape=(None, self.params_json["decoder_params"]["units"][0]))
+        input_layer = Input(shape=(self.params_json["decoder_params"]["units"][0], ))
         sequence_input_layer = Input(shape=(None, ))
         embedding_layer = Embedding(input_dim=self.params_json["total_labels_n"], output_dim=decoder_params["embedding_dim"])(sequence_input_layer)
 
@@ -817,23 +798,34 @@ class RnnConv:
             if layer_n == 0:
 
                 if decoder_params["bidirectional"][layer_n]:
-                    lstm_layer = Bidirectional(LSTM(units=decoder_params["units"][layer_n], return_sequences=True))(embedding_layer, initial_state=input_layer)
+                    lstm_layer = Bidirectional(LSTM(units=decoder_params["units"][layer_n], 
+                                                    kernel_initializer=self.weights_init,
+                                                    return_sequences=True))(embedding_layer, initial_state=input_layer)
 
                 else:
-                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], return_sequence=True)(embedding_layer, initial_state=input_layer)
+                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], 
+                                      kernel_initializer=self.weights_init,
+                                      return_sequences=True)(embedding_layer, initial_state=input_layer)
             
             else:
 
                 if decoder_params["bidirectional"][layer_n]:
-                    lstm_layer = Bidirectional(LSTM(units=decoder_params["units"][layer_n], return_sequences=True))(lstm_layer)
+                    lstm_layer = Bidirectional(LSTM(units=decoder_params["units"][layer_n], 
+                                                    kernel_initializer=self.weights_init,
+                                                    return_sequences=True))(lstm_layer)
 
                 else:
-                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], return_sequence=True)(lstm_layer)
-
+                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], 
+                                        kernel_initializer=self.weights_init, 
+                                        return_sequences=True)(lstm_layer)
+    
             if not decoder_params["single_dropout"]:
                 lstm_layer = Dropout(rate=decoder_params["dropout_rates"][layer_n])(lstm_layer)
+
+        lstm_layer = LSTM(units=decoder_params["units"][layer_n], 
+                        kernel_initializer=self.weights_init,
+                        return_sequences=True)(lstm_layer)    
         
-        lstm_layer = LSTM(units=decoder_params["units"][-1])(lstm_layer)
         if decoder_params["single_dropout"]:
             lstm_layer = Dropout(rate=0.26)(lstm_layer)
         
@@ -846,5 +838,38 @@ class RnnConv:
         sequence_layer = Input(shape=(None, ))
         model_output_layer = self.decoder([self.encoder(model_input_layer), sequence_layer])
 
-        self.model = Model(inputs=model_input_layer, outputs=model_output_layer)
-        self.model.compile(loss=CategoricalCrossentropy(), optimizer="rmsprop")
+        self.model = Model(inputs=[model_input_layer, sequence_layer], outputs=model_output_layer)
+        self.model.compile(loss=SparseCategoricalCrossentropy(), optimizer="rmsprop")
+    
+
+    def _train_model_(self, train_images, train_sequences, epochs, batch_size):
+
+        self.model.fit([train_images, train_sequences], epochs=epochs, batch_size=batch_size)
+        model_weights_folder = os.path.join(self.params_json["run_folder"], "model_weights.weights.h5")
+        self.model.save_weights(filepath=model_weights_folder)
+
+    
+    def decoder_image(self, image, decoder_sequence_l):
+
+        encoded_state_vector = self.encoder.predict(image)
+        target_sequence = np.expand_dims(np.random.randint(0, self.params_json["total_words_n"]), axis=0)
+        decoded_sequence = ""
+        for _ in range(decoder_sequence_l):
+
+            predicted_sample = self.decoder.predict([encoded_state_vector, target_sequence])
+            target_sequence = np.expand_dims(np.random.randint(0, self.params_json["total_words_n"]), axis=0)
+            decoded_sequence.append(predicted_sample[0])
+        
+        return decoded_sequence
+    
+    
+    
+
+
+
+
+            
+        
+        
+        
+        
