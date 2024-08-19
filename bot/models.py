@@ -731,27 +731,32 @@ class RnnConv:
         if self.params_json is None:
             self._load_params_(filepath=params_path)
         
-        self.tokenizer = self.params_json["tokenizer"]
+        self.tokenizer = Tokenizer()
+        self._save_params_(filepath=params_path)
         self.encoder_layers_n = len(self.params_json["encoder_params"]["filters"])
         self.decoder_layers_n = len(self.params_json["decoder_params"]["units"])
+        self.weights_init = RandomNormal(mean=self.params_json["weights_init"]["mean"], stddev=self.params_json["weights_init"]["stddev"])
 
         self._build_encoder_()
         self._build_decoder_()
         self._build_model_()
-        self.weights_init = RandomNormal(mean=self.params_json["weights_params"]["mean"], stddev=self.params_json["weights_params"]["stddev"])
+        
     
     def _load_params_(self, filepath):
         
         if filepath is None:
-            filepath = "C:\\Users\\1\\Desktop\\PersonalFriendProject\\models_params\\RnnConv.json"
+            filepath = "C:\\Users\\1\\Desktop\\TelegramAIBotProject\\bot\\models_params\\RnnConv.json"
 
         with open(filepath, "r") as json_file:
             self.params_json = js.load(json_file)
     
-    def _save_params(self, filepath):
+    def _save_params_(self, filepath):
+
+        if filepath is None:
+            filepath = "C:\\Users\\1\\Desktop\\TelegramAIBotProject\\bot\\models_params\\RnnConv.json"
 
         with open(filepath, "w") as json_file:
-            js.dump(json_file, self.params_json)
+            js.dump(self.params_json, json_file)
 
     def _build_encoder_(self):
         
@@ -761,10 +766,8 @@ class RnnConv:
 
         for layer_n in range(self.encoder_layers_n):
 
-            conv_layer = Conv2D(filters=encoder_params["filters"][layer_n],
-                                kernel_size=encoder_params["kernel_size"][layer_n],
-                                strides=encoder_params["strides"][layer_n],
-                                kernel_initializer=self.weights_init,
+            conv_layer = Conv2D(filters=encoder_params["filters"][layer_n], kernel_size=encoder_params["kernel_size"][layer_n],
+                                strides=encoder_params["strides"][layer_n], kernel_initializer=self.weights_init,
                                 padding="same")(conv_layer)
             
             conv_layer = Activation(encoder_params["activations"][layer_n])(conv_layer)
@@ -777,19 +780,18 @@ class RnnConv:
         conv_layer = Activation(encoder_params["output_activation"])(conv_layer)
 
         output_layer = Flatten()(conv_layer)
-        output_layer = Dense(units=self.params_json["decoder_params"]["units"][0], activation="tanh")
-        output_layer = LSTM(units=self.params_json["decoder_params"]["units"][0])(output_layer)
+        output_layer = Dense(units=self.params_json["decoder_params"]["units"][0], activation="tanh")(output_layer)
 
+        self.saved_shape = output_layer.shape[1:]
         self.encoder = Model(inputs=input_layer, outputs=output_layer)
 
     def _build_decoder_(self):
         
         decoder_params = self.params_json["decoder_params"]
-
-        input_layer = Input(shape=(self.params_json["decoder_params"]["units"][0], ))
+        input_layer = Input(shape=(decoder_params["units"][0], ))
         sequence_input_layer = Input(shape=(None, ))
-        embedding_layer = Embedding(input_dim=self.params_json["total_labels_n"], output_dim=decoder_params["embedding_dim"])(sequence_input_layer)
 
+        embedding_layer = Embedding(input_dim=self.params_json["total_labels_n"], output_dim=decoder_params["embedding_dim"])(sequence_input_layer)
         for layer_n in range(self.decoder_layers_n):
             
             if layer_n == (self.decoder_layers_n - 1):
@@ -799,33 +801,25 @@ class RnnConv:
 
                 if decoder_params["bidirectional"][layer_n]:
                     lstm_layer = Bidirectional(LSTM(units=decoder_params["units"][layer_n], 
-                                                    kernel_initializer=self.weights_init,
-                                                    return_sequences=True))(embedding_layer, initial_state=input_layer)
-
+                                                    kernel_initializer=self.weights_init, 
+                                                    return_sequences=True))(embedding_layer, initial_state=[input_layer, input_layer])
+                    
                 else:
-                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], 
-                                      kernel_initializer=self.weights_init,
-                                      return_sequences=True)(embedding_layer, initial_state=input_layer)
+                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], kernel_initializer=self.weights_init, 
+                                      return_sequences=True)(embedding_layer, initial_state=[input_layer, input_layer])
             
             else:
 
                 if decoder_params["bidirectional"][layer_n]:
-                    lstm_layer = Bidirectional(LSTM(units=decoder_params["units"][layer_n], 
-                                                    kernel_initializer=self.weights_init,
-                                                    return_sequences=True))(lstm_layer)
-
+                    lstm_layer = Bidirectional(LSTM(units=decoder_params["units"][layer_n], kernel_initializer=self.weights_init, return_sequences=True))(lstm_layer)
+                    
                 else:
-                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], 
-                                        kernel_initializer=self.weights_init, 
-                                        return_sequences=True)(lstm_layer)
+                    lstm_layer = LSTM(units=decoder_params["units"][layer_n], kernel_initializer=self.weights_init, return_sequences=True)(lstm_layer)
     
             if not decoder_params["single_dropout"]:
                 lstm_layer = Dropout(rate=decoder_params["dropout_rates"][layer_n])(lstm_layer)
 
-        lstm_layer = LSTM(units=decoder_params["units"][layer_n], 
-                        kernel_initializer=self.weights_init,
-                        return_sequences=True)(lstm_layer)    
-        
+        lstm_layer = LSTM(units=decoder_params["units"][layer_n], kernel_initializer=self.weights_init, return_sequences=True)(lstm_layer)    
         if decoder_params["single_dropout"]:
             lstm_layer = Dropout(rate=0.26)(lstm_layer)
         
@@ -842,9 +836,9 @@ class RnnConv:
         self.model.compile(loss=SparseCategoricalCrossentropy(), optimizer="rmsprop")
     
 
-    def _train_model_(self, train_images, train_sequences, epochs, batch_size):
+    def train_model(self, train_images, train_sequences, epochs, batch_size):
 
-        self.model.fit([train_images, train_sequences], epochs=epochs, batch_size=batch_size)
+        self.model.fit([train_images, train_sequences], train_sequences, epochs=epochs, batch_size=batch_size)
         model_weights_folder = os.path.join(self.params_json["run_folder"], "model_weights.weights.h5")
         self.model.save_weights(filepath=model_weights_folder)
 
@@ -861,7 +855,90 @@ class RnnConv:
             decoded_sequence.append(predicted_sample[0])
         
         return decoded_sequence
+
+
+
+# TODO : {
+#   1. write model train function
+#   2. write write decode function
+#}
+class SeqToSeq:
+
+    def __init__(self, params_json=None, params_path=None) -> None:
+        
+        self.params_json = params_json
+        if self.params_json is None:
+            self._load_params_(filepath=params_path)
+
+        self._save_params_(filepath=params_json)
+        self.rnn_layers_n = len(self.params_json["decoder_params"]["units"])
+
+    def _load_params_(self, filepath):
+        
+        if filepath is None:
+            filepath = "C:\\Users\\1\\Desktop\\TelegramAIBotProject\\bot\\models_params\\SeqToSeq.json"
+
+        with open(filepath, "r") as json_file:
+            self.params_json = js.load(json_file)
     
+    def _save_params_(self, filepath):
+
+        if filepath is None:
+            filepath = "C:\\Users\\1\\Desktop\\TelegramAIBotProject\\bot\\models_params\\SeqToSeq.json"
+
+        with open(filepath, "w") as json_file:
+            js.dump(self.params_json, json_file)
+
+        
+    
+    def _build_encoder_(self):
+        
+        encoder_params = self.params_json["encoder_params"]
+        decoder_params = self.params_json["decoder_params"]
+
+        encoder_input_layer = Input(shape=(None, ))
+        decoder_input_layer = Input(shape=(None, ))
+
+        encoder_embedding_layer = Embedding(input_dim=encoder_params["total_labels_n"], output_dim=encoder_params["embedding_dim"])(encoder_input_layer)
+        decoder_embedding_layer = Embedding(input_dim=decoder_params["total_labels_n"], output_dim=decoder_params["decoder_dim"])(decoder_input_layer)
+
+        encoder_lstm_layer = encoder_embedding_layer
+        decoder_lstm_layer = decoder_embedding_layer
+
+        for layer_n in range(self.layers_n):
+
+            if layer_n == (self.encoder_layers_n - 1):
+                break
+
+            encoder_lstm_layer = LSTM(units=encoder_params["units"][layer_n], return_sequence=True)(encoder_lstm_layer)
+            decoder_lstm_layer = LSTM(units=decoder_params["units"][layer_n], return_sequences=True)(decoder_lstm_layer)
+
+            encoder_lstm_layer = LayerNormalization()(encoder_lstm_layer)
+            decoder_lstm_layer = LayerNormalization()(decoder_lstm_layer)
+        
+        encoder_output_layer = LSTM(units=encoder_params["units"][-1])(encoder_lstm_layer)
+        encoder_output_layer = Dropout(encoder_params["dropout_rate"])(encoder_output_layer)
+
+        decoder_output_layer = LSTM(units=decoder_params["units"][-1])(decoder_lstm_layer)
+        decoder_output_layer = Dropout(decoder_params["dropout_rate"])(decoder_output_layer)
+        decoder_output_layer = Dense(units=decoder_params["total_labels_n"], activation="softmax")(decoder_output_layer)
+
+        self.encoder = Model(inputs=encoder_input_layer, outputs=encoder_output_layer)
+        self.decoder = Model(inputs=decoder_input_layer, outputs=decoder_output_layer)
+
+        self.model = Model(inputs=[encoder_input_layer, decoder_input_layer], outputs=decoder_output_layer)
+        self.model.compile(loss=SparseCategoricalCrossentropy(), optimizer="rmsprop")
+        
+
+        
+    
+    def _build_decoder_(self):
+
+        
+
+            
+    
+
     
     
 

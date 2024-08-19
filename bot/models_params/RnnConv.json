@@ -1,0 +1,68 @@
+{
+    "input_shape": [
+        224,
+        224,
+        3
+    ],
+    "total_labels_n": 1000,
+    "weights_init": {
+        "mean": 0,
+        "stddev": 1
+    },
+    "encoder_params": {
+        "single_dropout": false,
+        "filters": [
+            128,
+            64,
+            64,
+            32
+        ],
+        "kernel_size": [
+            3,
+            3,
+            3,
+            3
+        ],
+        "strides": [
+            1,
+            2,
+            2,
+            1
+        ],
+        "dropout_rates": [
+            0.26,
+            0.26,
+            0.26,
+            0.26
+        ],
+        "activations": [
+            "linear",
+            "linear",
+            "linear",
+            "linear"
+        ],
+        "output_activation": "tanh"
+    },
+    "decoder_params": {
+        "embedding_dim": 100,
+        "single_dropout": false,
+        "units": [
+            256,
+            256,
+            256,
+            256
+        ],
+        "bidirectional": [
+            0,
+            0,
+            1,
+            1
+        ],
+        "dropout_rates": [
+            0.26,
+            0.26,
+            0.26,
+            0.26
+        ]
+    }
+}

@@ -1,0 +1,102 @@
+{
+    "input_shape": [
+        48,
+        48,
+        3
+    ],
+    "noise_dim": 100,
+    "weights_init": {
+        "init": true,
+        "mean": 0.05,
+        "stddev": 0.12
+    },
+    "dis_conv_filters": [
+        32,
+        32,
+        64,
+        64
+    ],
+    "dis_conv_kernel_size": [
+        3,
+        3,
+        3,
+        3
+    ],
+    "dis_conv_strides": [
+        1,
+        2,
+        2,
+        1
+    ],
+    "dis_conv_activations": [
+        "linear",
+        "linear",
+        "linear",
+        "linear"
+    ],
+    "dis_conv_dropout_rates": [
+        0.56,
+        0.56,
+        0.56,
+        0.56
+    ],
+    "dis_dense_units": [
+        32,
+        32,
+        64,
+        64
+    ],
+    "dis_dense_dropout_rates": [
+        0.56,
+        0.56,
+        0.56,
+        0.56
+    ],
+    "dis_dense_activations": [
+        "relu",
+        "relu",
+        "relu",
+        "relu"
+    ],
+    "dis_learning_rate": 0.01,
+    "dis_loss_function": "mse",
+    "dis_metrics": [
+        "mae"
+    ],
+    "gen_conv_filters": [
+        32,
+        32,
+        64,
+        64
+    ],
+    "gen_conv_kernel_size": [
+        3,
+        3,
+        3,
+        3
+    ],
+    "gen_conv_activations": [
+        "linear",
+        "linear",
+        "linear",
+        "linear"
+    ],
+    "gen_conv_dropout_rates": [
+        0.56,
+        0.56,
+        0.56,
+        0.56
+    ],
+    "gen_out_activations": "tanh",
+    "gen_conv_strides": [
+        1,
+        2,
+        2,
+        1
+    ],
+    "entire_model_learning_rate": 0.01,
+    "entire_model_loss_function": "mse",
+    "entire_model_metrics": [
+        "mae"
+    ]
+}
