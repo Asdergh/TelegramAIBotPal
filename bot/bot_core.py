@@ -2,12 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os 
 import cv2
-
+import json as js
+import tensorflow.keras.backend as K
 
 from PIL import Image
 from matplotlib.animation import FuncAnimation
-from models import VarEncoder
-from models import RNN
+from models.conv_var_ae import VarEncoder
+from models.rnn import RNN
 from matplotlib.animation import FuncAnimation
 from telegram.ext import Application, filters, ContextTypes
 from telegram.ext import MessageHandler, CommandHandler
@@ -34,11 +35,11 @@ class BotCore:
 
         self.start_handler = CommandHandler(command="start", callback=self.show_functional)
         self.images_handler = MessageHandler(filters=filters.PHOTO, callback=self.save_image)
-        self.voice_handler = MessageHandler(filters=filters.VOICE, callback=self.voice_image)
+        self.voice_handler = MessageHandler(filters=filters.VOICE, callback=self.save_image)
+        self.text_handler = MessageHandler(filters=filters.TEXT, callback=self.emotion_classification)
         
         
-        
-        all_handlers = [self.start_handler, self.msg_handler]
+        all_handlers = [self.start_handler, self.images_handler, self.voice_handler, self.text_handler]
         for handler in all_handlers:
             self.application.add_handler(handler)
         self.application.run_polling(poll_interval=3)
@@ -110,13 +111,16 @@ class BotCore:
     async def show_functional(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Hello world")
     
-    async def save_msg(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def save_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         image_number = len(os.listdir(self.images_handler)) + 1
         image_path = os.path.join(self.saved_images_folder, f"image{image_number}.png")
         
         image = await update.message.effective_attachment[-1].get_file()
         await update.message.d
+    
+    async def save_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        pass
         
     
     
