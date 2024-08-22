@@ -109,8 +109,8 @@ class Tocotron2:
         
         
         dense2conv_layer = RepeatVector(n=decoder_params["max_sequence_lenght"])(dense_layer)
-        mel_sequence_output = Concatenate(axis=1, name="DecoderSecondOutputLayer")([conv_layer, dense2conv_layer])
-        mel_sequence_output = Activation(conv_params["output_activation"], name="DecoderSecondOutputActivation")(conv_layer)
+        mel_sequence_output = Concatenate(axis=1, name="DecoderOutputLayer")([conv_layer, dense2conv_layer])
+        mel_sequence_output = Activation(conv_params["output_activation"], name="DecoderOutputActivation")(conv_layer)
 
         self.decoder = Model(inputs=[input_layer, encoder_output_layer], outputs=mel_sequence_output)
         
@@ -123,29 +123,11 @@ class Tocotron2:
         decoder_forward = self.decoder([decoder_input_layer, encoder_forward])
 
         wavenet_params = self.params_json["wavenet_params"]
-        wavenet_layers = []
-        for layer_n in range(wavenet_params["layers_n"]):
-            
-            if layer_n == 0:
-                wavenet_layer = WaveNetLayer(filters=wavenet_params["filters"],
-                                            kernel_size=wavenet_params["kernel_size"],
-                                            output_dim=wavenet_params["output_dim"],
-                                            max_seq_len=wavenet_params["max_seq_len"])(decoder_forward)
-            
-            else:
-                wavenet_layer = WaveNetLayer(filters=wavenet_params["filters"],
-                                             kernel_size=wavenet_params["kernel_size"],
-                                             output_dim=wavenet_params["output_dim"],
-                                             max_seq_len=wavenet_params["max_seq_len"])(wavenet_layer)
-                
-                wavenet_layer = Add()([wavenet_layer, wavenet_layers[-1]])
-
-            wavenet_layers.append(wavenet_layer)
-
-        self.wavenet_model = Model(inputs=decoder_forward[1], outputs=wavenet_layer)
-        self.model = Model(inputs=[encoder_input_layer, decoder_input_layer], 
-                           outputs=wavenet_layer)
-        self.model.compile(loss=["mse", "sparse_categorical_crossentropy"], optimizer="rmsprop")
+        model_output_layer = WaveNetLayer(filters=wavenet_params["filters"], kernel_size=wavenet_params["kernel_size"],
+                                     output_dim=wavenet_params["output_dim"])(decoder_forward)
+        
+        self.model = Model(inputs=[encoder_input_layer, decoder_input_layer], outputs=model_output_layer)
+        self.model.compile(loss="categorical_crossentropy", optimizer="rmsprop")
     
     def train_model(self, train_texts_sequences, train_voice_sequences, epochs, batch_size):
         
@@ -159,26 +141,35 @@ class Tocotron2:
                        batch_size=batch_size, shuffle=True)
         self.model.save_weigths(filepath=weights_path)
     
-    def decode_sequence(self, text_sequences, accuracy_epochs):
+    def decode_sequence(self, text_sequences, number_of_sequences):
         
         sequence_lenght = self.params_json["wavenet_params"]["max_seq_len"]
         max_audio_aplitude = self.params_json["wavenet_params"]["output_dim"]
 
         encoder_output = self.encoder.predict(text_sequences)
         audio_sample = np.random.randint(0, max_audio_aplitude, (1, sequence_lenght))
-        for _ in range(accuracy_epochs):
+        pred_sequences = [] + audio_sample.tolist()
+        pred_mel_spects = []
 
-            pred_len, pred_mel = self.decoder.predict([encoder_output, audio_sample])
+        for _ in range(number_of_sequences):
 
+            pred_mel = self.decoder.predict([encoder_output, audio_sample])
             pred_audio_sample = self.wavenet_model.predict(pred_mel)
-            pred_audio_sample = [np.argmax(sample) for sample in pred_audio_sample]
-            pred_audio_sample = np.asarray(pred_audio_sample, dtype="int64")
+            pred_audio_sample = np.asarray([np.argmax(sample) for sample in pred_audio_sample], dtype="int")
 
-            audio_sample = pred_audio_sample[:pred_len]
+            audio_sample = pred_audio_sample
+            pred_sequences += pred_audio_sample.tolist()
+            pred_mel_spects.append(pred_mel)
             
-        return audio_sample
+        return pred_sequences
         
         
+
+
+    
+   
+
+    
 
 
         
