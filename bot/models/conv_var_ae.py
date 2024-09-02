@@ -5,6 +5,7 @@ import cv2
 import json as js
 import tensorflow.keras.backend as K
 
+from PIL import Image
 from layers import *
 from tensorflow.keras.layers import Input, Dense, Activation, Reshape, LayerNormalization, BatchNormalization, Add
 from tensorflow.keras.layers import LSTM, GRU, Masking, Bidirectional, Dropout, Conv2D, Conv2DTranspose, Flatten
@@ -181,40 +182,79 @@ class VarEncoder:
             self.params_json = js.load(file)
 
 
-    def save_samples(self, samples_number, data_tensor, run_folder):
+    def save_samples(self, samples_number, data_tensor, run_folder, save_as_animation=False, animation_frames=None):
+        
+
+        def _generate_show_tensor_(samples_number_sq, decoded_images):
+            
+            if not (self.params_json["input_shape"][-1] == 1):
+                show_tensor = np.zeros((samples_number_sq * self.params_json["input_shape"][0], samples_number_sq * self.params_json["input_shape"][1], self.params_json["input_shape"][-1]))
+        
+            else:
+                show_tensor = np.zeros((samples_number_sq * self.params_json["input_shape"][0], samples_number_sq * self.params_json["input_shape"][1]))
+            
+            sample_number = 0
+            for i in range(samples_number_sq):
+                for j in range(samples_number_sq):
+                    
+                    if not (self.params_json["input_shape"][-1] == 1):
+                        show_tensor[i * self.params_json["input_shape"][0]: (i + 1) * self.params_json["input_shape"][0],
+                                    j * self.params_json["input_shape"][0]: (j + 1) * self.params_json["input_shape"][1], :] = decoded_images[sample_number]
+                    
+                    else:
+                        show_tensor[i * self.params_json["input_shape"][0]: (i + 1) * self.params_json["input_shape"][0],
+                                    j * self.params_json["input_shape"][0]: (j + 1) * self.params_json["input_shape"][1]] = decoded_images[sample_number]
+
+                    sample_number += 1
+
+            return show_tensor
         
         gen_samples_folder = os.path.join(run_folder, "generated_samples")
         if not os.path.exists(gen_samples_folder):
             os.mkdir(gen_samples_folder)
-        curent_epoch_samples = os.path.join(gen_samples_folder, f"generated_samples_{self.epoch_iterator}.png")
-
         samples_number_sq = int(np.sqrt(samples_number))
-        fig, axis = plt.subplots()
-
-        if not (self.params_json["input_shape"][-1] == 1):
-            show_tensor = np.zeros((samples_number_sq * self.params_json["input_shape"][0], samples_number_sq * self.params_json["input_shape"][1], self.params_json["input_shape"][-1]))
         
+        if not save_as_animation:
+            
+            fig, axis = plt.subplots()
+
+            random_idx = np.random.randint(0, data_tensor.shape[0] - 1, samples_number)
+            encoded_vectors = self.encoder.predict(data_tensor[random_idx])
+            decoded_images = self.decoder.predict(encoded_vectors)
+
+            curent_epoch_samples = os.path.join(gen_samples_folder, f"generated_samples_{self.epoch_iterator}.png")
+            show_tensor = _generate_show_tensor_(samples_number_sq=samples_number_sq, decoded_images=decoded_images)
+            axis.imshow(show_tensor, cmap="inferno")
+            fig.savefig(curent_epoch_samples)
+    
         else:
-            show_tensor = np.zeros((samples_number_sq * self.params_json["input_shape"][0], samples_number_sq * self.params_json["input_shape"][1]))
+            
+            gen_samples_frames = os.path.join(gen_samples_folder, f"samples_frames{self.epoch_iterator}")
+            if not os.path.exists(gen_samples_frames):
+                os.mkdir(gen_samples_frames)
 
-        random_idx = np.random.randint(0, data_tensor.shape[0] - 1, samples_number)
-        encoded_vectors = self.encoder.predict(data_tensor[random_idx])
-        decoded_images = self.decoder.predict(encoded_vectors)
-        sample_number = 0
-
-        for i in range(samples_number_sq):
-            for j in range(samples_number_sq):
+            gen_animation_path = os.path.join(gen_samples_folder, f"generated_samples_{self.epoch_iterator}.gif")
+            for frame_n in range(animation_frames):
                 
-                if not (self.params_json["input_shape"][-1] == 1):
-                    show_tensor[i * self.params_json["input_shape"][0]: (i + 1) * self.params_json["input_shape"][0],
-                                j * self.params_json["input_shape"][0]: (j + 1) * self.params_json["input_shape"][1], :] = decoded_images[sample_number]
-                
-                else:
-                    show_tensor[i * self.params_json["input_shape"][0]: (i + 1) * self.params_json["input_shape"][0],
-                                j * self.params_json["input_shape"][0]: (j + 1) * self.params_json["input_shape"][1]] = decoded_images[sample_number]
+                frame_path = os.path.join(gen_samples_frames, f"samples_frame_{frame_n}.png")
 
-                sample_number += 1
+                random_idx = np.random.randint(0, data_tensor.shape[0] - 1, samples_number)
+                encoded_data = self.encoder.predict(data_tensor[random_idx])
+                decoded_images = self.decoder.predict(encoded_data)
+                
+                show_tensor =  _generate_show_tensor_(samples_number_sq=samples_number_sq, decoded_images=decoded_images)
+                cv2.imwrite(frame_path, show_tensor)
+            
+            images = []
+            for image_path in os.listdir(gen_samples_frames):
+            
+                image_path = os.path.join(gen_samples_frames, image_path)
+                image = Image.open(image_path)
+                images.append(image)
+            
+                images[0].save(gen_animation_path, save_all=True, append_images=images, optimize=False, duration=100, loop=0)
+
+            
+            
+
         
-        
-        axis.imshow(show_tensor, cmap="inferno")
-        fig.savefig(curent_epoch_samples)

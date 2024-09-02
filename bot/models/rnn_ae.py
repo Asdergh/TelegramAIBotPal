@@ -1,11 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import json as js
+import random as rd
 import os 
 
 from tensorflow.keras.layers import Input, Dense, Activation, LayerNormalization, Dropout
 from tensorflow.keras.layers import Embedding, LSTM, Bidirectional, GRU, Attention
-from tensorflow.keras.losses import CategoricalCrossentropy
+from tensorflow.keras.losses import CategoricalCrossentropy, SparseCategoricalCrossentropy
 from tensorflow.keras.initializers import RandomNormal
 from tensorflow.keras.optimizers import RMSprop
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -32,10 +33,55 @@ class RNN_AE:
         self._build_decoder_()
         self._build_model_()
 
+        self.model_losses = []
+
         
         self._save_params_(filepath=params_path)
         
+    
+    def load_tokenizers(self, encoder_tokenizer, decoder_tokenizer):
+        
+        model_wocab_folder = os.path.join(self.params_json["run_folder"], "model_wocab")
+        if not os.path.exists(model_wocab_folder):
+            os.mkdir(model_wocab_folder)
+        
+        encoder_wocab_path = os.path.join(model_wocab_folder, "encoder_wocab.json")
+        decoder_wocab_path = os.path.join(model_wocab_folder, "decoder_wocab.json")
+        
+        self.encoder_tokenizer = encoder_tokenizer
+        self.decoder_tokenizer = decoder_tokenizer
+        
+        paths = [encoder_wocab_path, decoder_wocab_path]
+        contents = [self.encoder_tokenizer.word_index, self.decoder_tokenizer.word_index]
+        
+        for (content, path) in zip(contents, paths):
+            
+            with open(path, "w") as json_file:
+                js.dump(content, json_file)
+    
+    def expand_tokenizer(self, new_words, model_type="decoder"):
 
+        wocab_folder = os.path.join(self.params_json["run_folder"], "model_wocab")
+        wocab_path = os.path.join(wocab_folder, f"{model_type}_wocab.json")
+        with open(wocab_path, "r") as json_file:
+            word_index = js.load(json_file)
+        
+        for word in new_words:
+
+            if word not in word_index.keys():
+                word_index[word] = word_index.values()[-1] + 1
+        
+        if model_type == "decoder":
+            self.decoder_tokenizer.word_index = word_index
+        
+        elif model_type == "encoder":
+            self.decoder_tokenizer.word_index = word_index
+        
+        else:
+            raise ValueError(f"wrong modeltpye: [{model_type}]!!!")
+        
+
+    
     def _save_params_(self, filepath):
         
         with open(filepath, "w") as file:
@@ -50,15 +96,24 @@ class RNN_AE:
          
         encoder_params = self.params_json["encoder_params"]
 
-        self.encoder_input_layer = Input(shape=(None, ))
-        embedding_layer = Embedding(input_dim=encoder_params["total_words_n"], output_dim=self.params_json["embedding_dim"])(self.encoder_input_layer)
+        self.encoder_input_layer = Input(shape=(None, ), 
+                                        name="EncoderInputLayer")
+        embedding_layer = Embedding(input_dim=encoder_params["total_words_n"], 
+                                    output_dim=self.params_json["embedding_dim"],
+                                    name="EmbeddingLayer")(self.encoder_input_layer)
         lstm_layer = embedding_layer
 
-        for _ in range(encoder_params["lstm_params"]["layers_n"]):
+        for layer_n in range(encoder_params["lstm_params"]["layers_n"]):
             
-            lstm_layer = LSTM(units=encoder_params["lstm_params"]["units"], return_sequences=True, kernel_initializer=self.weights_init)(lstm_layer)
-            lstm_layer = LayerNormalization(epsilon=0.01)(lstm_layer)
-            lstm_layer = Dropout(rate=encoder_params["lstm_params"]["dropout_rate"])(lstm_layer)
+            lstm_layer = LSTM(units=encoder_params["lstm_params"]["units"], 
+                            return_sequences=True, 
+                            kernel_initializer=self.weights_init, 
+                            name=f"EncoderLSTMLayer{layer_n}")(lstm_layer)
+            
+            lstm_layer = LayerNormalization(epsilon=0.01, 
+                                name=f"LayerNormalization{layer_n}")(lstm_layer)
+            lstm_layer = Dropout(rate=encoder_params["lstm_params"]["dropout_rate"], 
+                                name=f"LSTMDropoutRate{layer_n}")(lstm_layer)
         
         self.encoder = Model(inputs=self.encoder_input_layer, outputs=lstm_layer)
     
@@ -66,20 +121,27 @@ class RNN_AE:
 
         decoder_params = self.params_json["decoder_params"]
         
-        input_layer = Input(shape=(None, ))
-        embedding_layer = Embedding(input_dim=decoder_params["total_words_n"], output_dim=self.params_json["embedding_dim"])(input_layer)
+        input_layer = Input(shape=(None, ),  name="DecoderInputLayer")
+        embedding_layer = Embedding(input_dim=decoder_params["total_words_n"], 
+                                    output_dim=self.params_json["embedding_dim"],
+                                    name="DecoderEmbeddingLayer")(input_layer)
 
-        lstm_layer = LSTM(units=decoder_params["lstm_params"]["units"], return_sequences=True)(embedding_layer)
-        input_layer_1 = Input(shape=lstm_layer.shape[1:])
+        lstm_layer = LSTM(units=decoder_params["lstm_params"]["units"], return_sequences=True,
+                        name="LSTMInputLayer")(embedding_layer)
+        input_layer_1 = Input(shape=(lstm_layer.shape[1:]), name="DecoderSequenceInputLayer")
         lstm_layer = Attention()([lstm_layer, input_layer_1])
 
-        print(lstm_layer.shape)
+        for layer_n in range(0, decoder_params["lstm_params"]["layers_n"] - 1):
 
-        for _ in range(0, decoder_params["lstm_params"]["layers_n"] - 1):
-
-            lstm_layer = LSTM(units=decoder_params["lstm_params"]["units"], return_sequences=True, kernel_initializer=self.weights_init)(lstm_layer)
-            lstm_layer = LayerNormalization(epsilon=0.01)(lstm_layer)
-            lstm_layer = Dropout(rate=decoder_params["lstm_params"]["dropout_rate"])(lstm_layer)
+            lstm_layer = LSTM(units=decoder_params["lstm_params"]["units"], 
+                            return_sequences=True, 
+                            kernel_initializer=self.weights_init,
+                            name=f"DecoderLSTMLayer{layer_n}")(lstm_layer)
+            
+            lstm_layer = LayerNormalization(epsilon=0.01, 
+                                            name=f"DecoderNormalizationLayer{layer_n}")(lstm_layer)
+            lstm_layer = Dropout(rate=decoder_params["lstm_params"]["dropout_rate"], 
+                                 name=f"DecoderDropoutLayer{layer_n}")(lstm_layer)
         
         lstm_layer = LSTM(units=decoder_params["lstm_params"]["units"])(lstm_layer)
         probability_output_layer = Dense(units=decoder_params["total_words_n"], activation="softmax")(lstm_layer)
@@ -98,120 +160,73 @@ class RNN_AE:
     
     
     
-    def train_model(self, encoder_train_tensor, decoder_train_tensor, decoder_train_labels, batch_size, epochs):
+    def train_model(self, encoder_train_tensor, 
+                    decoder_train_tensor, decoder_train_labels, 
+                    batch_size, epochs):
+
+        weights_folder = os.path.join(self.params_json["run_folder"], "model_weights")
+        if not os.path.exists(weights_folder):
+            os.mkdir(weights_folder)
+
+        weights_path = os.path.join(weights_folder, "weights.weights.h5")
+        self.model.fit([encoder_train_tensor, decoder_train_tensor], 
+                       decoder_train_labels, 
+                       batch_size=batch_size, epochs=epochs)
+        self.model.save_weights(filepath=weights_path)
+    
+    def generate_sequence(self, input_question, sequence_len, target_sequence_len):
         
-        for _ in range(epochs):
-
-            random_idx = np.random.randint(0, encoder_train_tensor.shape[0], batch_size)
-            
-            encoder_input_samples = encoder_train_tensor[random_idx]
-            decoder_input_samples = decoder_train_tensor[random_idx]
-
-            decoder_input_labels = decoder_train_labels[random_idx]
-            decoder_input_labels = to_categorical(decoder_input_labels, num_classes=self.params_json["decoder_params"]["total_words_n"])
-
-            for (decoder_sub_samples, decoder_sub_labels) in zip(decoder_input_samples, decoder_input_labels):
-
-                self.model.train_on_batch([encoder_input_samples, decoder_sub_samples], decoder_sub_labels)
-                
-
         
-
         
     
-    def save_sample(self, input_encoder_sequence, filepath=None, input_sequence=None, sequence_lenght=100):
+        output_text = "["
+    
+        en_in = self.encoder_tokenizer.texts_to_sequences([input_question])[0]
+        en_in = np.asarray(en_in)
+        en_in = np.expand_dims(en_in, axis=0)
+        en_out = self.encoder.predict(en_in)
 
-        encoded_sequence = self.encoder.predict(input_encoder_sequence)
-        decoded_sequence = ""
+        dec_tar_seq = [np.random.randint(0, self.params_json["decoder_params"]["total_words_n"]) for _ in range(target_sequence_len + 1)]
+        for _ in range(sequence_len):
+            
+            
+            dec_tar_array = np.asarray(dec_tar_seq[-target_sequence_len: ])
+            dec_tar_array = np.expand_dims(dec_tar_array, axis=0)
 
-        if input_sequence is None:
-            input_sequence = np.zeros((1, self.params_json["decoder_params"]["total_labels_n"]))
-        
-        
-        for _ in range(sequence_lenght):
+            dec_logits = self.decoder.predict([dec_tar_array, en_out])
+            dec_label = np.argmax(dec_logits)
+            dec_word = self.decoder_tokenizer.index_word[dec_label]
 
-            decoded_word_logits = self.decoder.predict([input_sequence, encoded_sequence])
-            decoded_label = np.argmax(decoded_word_logits)
-            decoded_word = self.encoder_tokenizer.index_word[decoded_label]
+            output_text += " " + dec_word
+            dec_tar_seq.append(dec_label)
+            rd.shuffle(dec_tar_seq)
         
-            decoded_sequence += decoded_word
-        
-        decoded_sequence.repleace("---", "\n")
+        return output_text
+            
+    def load_weights(self, filepath=None):
+
         if filepath is None:
-            return decoded_sequence
+            filepath = "c:\\Users\\1\\Desktop\\models_save\\RNN_AE_save\\model_weights\\weights.weights.h5"
+        self.model.load_weights(filepath=filepath)
+    
 
-        if filepath is not None:
+        
+
             
-            with open(filepath, "w") as file:
-                file.write(decoded_sequence)
-    
-        
 
-if __name__ == "__main__":
+             
 
-    encoder_input_data = np.random.randint(0, 1000, (100, 30))
-    decoder_input_data = np.random.randint(0, 1000, (100, 100))
-    
-    decoder_data_tensor = []
-    decoder_data_labels = []
-    sample_lenght = 20
-
-    for (sample_number, sample) in enumerate(decoder_input_data):
-        
-        sample_tensor = []
-        sample_labels = []    
-        for i in range(sample.shape[0] - sample_lenght):
             
-            sample_tensor.append(sample[i: i + sample_lenght])
-            sample_labels.append(sample[i + sample_lenght])
-
-        sample_tensor = np.asarray(sample_tensor, dtype="int")
-        sample_labels = np.asarray(sample_labels, dtype="int")
-
-        decoder_data_tensor.append(sample_tensor)
-        decoder_data_labels.append(sample_labels)
-    
-    decoder_data_tensor = np.asarray(decoder_data_tensor, dtype="int")
-    decoder_data_labels = np.asarray(decoder_data_labels, dtype="int")
-    print(decoder_data_tensor.shape, decoder_data_labels.shape)
         
-    len_labels = np.ones(encoder_input_data.shape[0]) * 30
+    
+    
 
+        
+        
+        
+    
+        
 
-    encoder_total_words = np.argmax(encoder_input_data)
-    decoder_total_words = np.argmax(decoder_input_data)
-
-    params_json = {
-        "embedding_dim": 1000,
-        "weights_init": {
-            "mean": 0.0,
-            "stddev": 1.0
-        },
-        "encoder_params": {
-            "total_words_n": int(encoder_total_words),
-            "lstm_params": {
-                "layers_n": 3,
-                "units": 215,
-                "dropout_rate": 0.26
-            }
-        },
-        "decoder_params": {
-            "total_words_n": int(decoder_total_words),
-            "lstm_params": {
-                "layers_n": 3,
-                "units": 215,
-                "dropout_rate": 0.26
-            },
-        }
-    }
-    rnn_ae = RNN_AE(params_json=params_json)
-    print(rnn_ae.encoder.summary())
-    print(rnn_ae.decoder.summary())
-
-    rnn_ae.train_model(encoder_train_tensor=encoder_input_data, 
-                        decoder_train_tensor=decoder_data_tensor,
-                        decoder_train_labels=decoder_data_labels, 
-                        batch_size=80, epochs=100)
 
 
 

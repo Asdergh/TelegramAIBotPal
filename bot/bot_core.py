@@ -9,6 +9,7 @@ from PIL import Image
 from matplotlib.animation import FuncAnimation
 from models.conv_var_ae import VarEncoder
 from models.rnn import RNN
+from models.rnn_ae import RNN_AE
 from matplotlib.animation import FuncAnimation
 from telegram.ext import Application, filters, ContextTypes
 from telegram.ext import MessageHandler, CommandHandler
@@ -22,10 +23,11 @@ class BotCore:
         
         self.seq2em_model = RNN(filepath="C:\\Users\\1\\Desktop\\PersonalFriendProject\\models_params\\RNN.json")
         self.em2img_model = VarEncoder(filepath="C:\\Users\\1\\Desktop\\PersonalFriendProject\\models_params\\VarAutoEncoder.json")
+        self.rnn_ae_model = RNN_AE()
 
         self.seq2em_model.load_weights()
         self.em2img_model.load_weights()
-
+        self.rnn_ae_model.load_weights()
 
         self.saved_images_folder = "C:\\Users\\1\\Desktop\\TelegramAIBotProject\\bot\\save_images_folder"
         self.saved_voices_folder = "C:\\Users\\1\\Desktop\\TelegramAIBotProject\\bot\\save_images_folder"
@@ -85,26 +87,33 @@ class BotCore:
         
             
             
-    def _extract_emotion_label_(self, msg):
+    def _generate_answer(self, msg):
 
         
-        self.seq2em_model.expand_tokenizer(new_words=msg)
+        self.seq2em_model.expand_tokenizer(new_words=msg.split())
+        self.rnn_ae_model.expand_tokenizer(new_words=msg.split())
 
-        token_list = self.seq2em_model.tokenizer.texts_to_sequences([msg])[0]
-        token_list = np.expand_dims(np.asarray(token_list, dtype="int64"), axis=0)
-
-        emotion_label = np.argmax(self.seq2em_model.model.predict(token_list)[0])
+        classification_tokens = self.seq2em_model.tokenizer.texts_to_sequences([msg.split()])[0]
+        classification_tokens = np.expand_dims(np.asarray(classification_tokens, dtype="int64"), axis=0)
+        
+        emotion_label = np.argmax(self.seq2em_model.model.predict(classification_tokens)[0])
         emotion_cll = self.seq2em_model.rnn_params["classes_discription"][str(emotion_label)]
-        return (emotion_label, emotion_cll)
+        
+        encoder_input = self.rnn_ae_model.encoder_tokenizer.texts_to_sequences([msg])[0]
+        encoder_input = np.asarray(encoder_input)
+        print(encoder_input.shape)
+        #answer_msg = self.rnn_ae_model.generate_sequence(input_question=msg, sequence_len=100, target_sequence_len=40)
+        
+        return (emotion_cll, answer_msg)
     
 
     async def emotion_classification (self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         
-        message_text = update.message.text.split()
-        _, emotion_cll = self._extract_emotion_label_(msg=message_text)
+        message_text = update.message.text
+        emotion_cll, generated_answer = self._generate_answer(msg=message_text)
         self._generate_reaction_img_(emotion_cll=emotion_cll)
 
-        await update.message.reply_text(f"Its look like you feel {emotion_cll} right know!!!")
+        await update.message.reply_text(f"Well as i can see you are in {emotion_cll} mood." + generated_answer)
         await update.message.reply_animation(animation=open(self.gif_path, "rb"))
 
 
