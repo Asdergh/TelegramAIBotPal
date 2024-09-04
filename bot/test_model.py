@@ -1,153 +1,113 @@
 import numpy as np
 import random as rd
 import matplotlib.pyplot as plt
-import librosa as lb
-import soundfile as sf
-import cv2
-import os
-import time as t
-import tensorflow.keras.backend as K
 
-from tensorflow.data import Dataset
-from tensorflow.keras.layers import Conv2D, Flatten
-from tensorflow.keras.layers import Input, Dense, Activation
-from tensorflow.keras import Model
-from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.layers import Input, Embedding, LSTM, Conv1D, Dropout, Attention, LayerNormalization
+from tensorflow.keras import Model, Sequential
 
-target_size = (450, 450, 3)
-batch_size = 25
+input_data = np.random.randint(0, 10000, (100, 30))
+total_words = np.max(input_data)
+test_dataset = None
 
-class ImageGenerator:
+params_json = {
+    "encoder_params": {        
+        "total_words_n":    1000,
+        "embedding_size":   100,
+        "layers_n":         3,
+        "units":            256,
+        "activation":       None,
+        "dropout_rate":    0.34
+    },
 
-    def __init__(self, data_path, data_type="train", target_size=(120, 128), categorical=False, batch_size=None) -> None:
-        
-        self.data_path = data_path
-        self.data_type = data_type
-        self.target_size = target_size
-        self.categorical = categorical
-        self.batch_size = batch_size
+    "decoder_params": {
+        "prenet_params": {
+            "epsilon": 0.001,
+            "dropout_rate": 0.26
+        },
+        "filters":          [32, 32, 64, 128                ],
+        "kernel_size":      [5, 5, 5, 5                     ],
+        "padding":          ["same", "same", "same", "same" ],
+        "strides":          [1, 1, 1, 1                     ],
+        "dropout_rates":    [0.26, 0.26, 0.26, 0.26         ],
+        "normalization_epsilon": 0.001
+    }
+}
 
-        self._curent_folder_ = None
-        for data_folder in os.listdir(self.data_path):
+def build_encoder(params_json):
 
-            if data_folder.lower() == self.data_type:
-                self._curent_folder_ = os.path.join(self.data_path, data_folder)
+    encoder_params = params_json["encoder_params"]
 
-        if self._curent_folder_ is None:
-            raise ValueError("data_type variable must have on the following values: [train, test, validation], to empasize data useabbility!!!")
-        
-        self._all_classes_ = os.listdir(self._curent_folder_)
+    input_layer = Input(shape=(None, ))
+    embedding_layer = Embedding(input_dim=encoder_params["total_words_n"], output_dim=encoder_params["embedding_size"])(input_layer)
+    lstm_layer = embedding_layer
 
-    def __iter__(self):
-        
-        while True:
-            yield self.__collect_data__()
+    for _ in range(encoder_params["layers_n"]):
+
+        lstm_layer = LSTM(units=encoder_params["units"], return_sequences=True)(lstm_layer)
+        lstm_layer = Dropout(rate=encoder_params["dropout_rate"])(lstm_layer)
     
-    def __next__(self):
+    encoder = Model(inputs=input_layer, outputs=lstm_layer)
+    return encoder
 
-        return self.__collect_data__()
-    
+def build_decoder(params_json, encoder_output):
 
-    def __one_sample__(self):
+    decoder_params = params_json["decoder_params"]
 
-        random_idx = np.random.randint(0, len(self._all_classes_), dtype="int")
-        sub_folder = os.path.join(self._curent_folder_, self._all_classes_[random_idx])
-        sample_path = os.path.join(sub_folder, rd.choice(os.listdir(sub_folder)))
+    input_layer = Input(shape=(None, decoder_params["filters"][-1]))
+    prenet_layer = Sequential(layers=[
+        LayerNormalization(epsilon=decoder_params["prenet_params"]["epsilon"]),
+        Dropout(rate=decoder_params["prenet_params"]["dropout_rate"])])(input_layer)
 
-        sample = cv2.imread(sample_path)
-        sample = cv2.resize(sample, self.target_size)
-        return (random_idx, sample)
+    lstm_layer = LSTM(units=params_json["encoder_params"]["units"], return_sequences=True)(prenet_layer)
+    att_layer = Attention()([lstm_layer, encoder_output])
 
-    def __batch_sample__(self):
+    conv_layer = att_layer
+    for layer_n in range(len(decoder_params["filters"])):
+
+        conv_layer = Conv1D(filters=decoder_params["filters"][layer_n], kernel_size=decoder_params["kernel_size"][layer_n],
+                            padding=decoder_params["padding"][layer_n], strides=decoder_params["strides"][layer_n])(conv_layer)
         
-        random_idx = np.random.randint(0, len(self._all_classes_), self.batch_size, dtype="int")
-        sub_folders = [os.path.join(self._curent_folder_, self._all_classes_[idx]) for idx in random_idx]
-        sample = []
-
-        for sub_folder in sub_folders:
-
-            pathes = os.listdir(sub_folder)
-            sample_path = os.path.join(sub_folder, rd.choice(pathes))
-            sub_sample = cv2.imread(sample_path)
-            sub_sample = cv2.resize(sub_sample, self.target_size)
-
-            sample.append(sub_sample)
-
-        sample = np.asarray(sample)
-        return (random_idx, sample)
+        conv_layer = LayerNormalization(epsilon=decoder_params["normalization_epsilon"])(conv_layer)
+        conv_layer = Dropout(rate=decoder_params["dropout_rates"][layer_n])(conv_layer)
     
-    def __one_label__(self, idx):
+    decoder = Model(inputs=[input_layer, encoder_output], outputs=conv_layer)
+    return decoder
 
-        label = np.zeros(len(self._all_classes_))
-        label[idx] = 1.0
-        return label
-    
-    def __batch_label__(self, idx):
+input_layer = Input(shape=(None, ))
+decoder_input_layer = Input(shape=(None, 128, ))
 
-        labels = [np.zeros(len(self._all_classes_)) for _ in range(batch_size)]
-        for label_n, (idx, label) in enumerate(zip(idx, labels)):
-                        
-            label[idx] = 1.0
-            labels[label_n] = label
-        
-        return label
+encoder = build_encoder(params_json=params_json)
+encoder_output = encoder(input_layer)
+decoder = build_decoder(params_json=params_json, encoder_output=encoder_output)
+decoder_output = decoder([decoder_input_layer, encoder_output])
 
-    def __collect_data__(self):
-
-        if self.batch_size == 1 or self.batch_size is None:
-            random_idx, sample = self.__one_sample__()
-            
-        else:
-            random_idx, sample = self.__batch_sample__()
-                
-        if self.categorical:
-                
-            if self.batch_size == 1 or self.batch_size is None:
-                label = self.__one_label__(idx=random_idx)
-                
-            else:
-                label = self.__batch_label__(idx=random_idx)
-
-            return (sample, label)
-            
-        else:
-            return sample
-        
-    
-            
-    
-
-   
-
-            
+model = Model(inputs=[input_layer, decoder_input_layer], outputs=decoder_output)
+model.compile(optimizer="adam", loss="mean_squared_error")
 
 
-time_s = t.time()
-image_generator = ImageGenerator(data_path="c:\\Users\\1\\Desktop\\data_files\\human_emotions", target_size=target_size[:-1], categorical=False, batch_size=1000)
-data_tensor = next(image_generator)
-time_e = t.time()
-print(data_tensor.shape, time_e - time_s)
-# dataset = Dataset
-# dataset = dataset.from_generator(generator=image_generator, output_types="float")
-# dataset_batched = dataset.batch(batch_size=batch_size)
+test_input = np.random.randint(0, 1000, (100, 100))
+decoder_input = np.zeros((100, 100, 128))
+
+model_output = model.fit([test_input, decoder_input], decoder_input, epochs=10, batch_size=32)
+
+plt.style.use("dark_background")
+fig, axis = plt.subplots()
+
+new_test = np.zeros((1, 100, 128))
+encoded_output = encoder.predict(np.expand_dims(test_input[0], axis=0))
+decoded_output = decoder.predict([new_test, encoded_output])
+
+axis.imshow(decoded_output[0], cmap="inferno")
+plt.show()
+
+
+
+
+
 
 
     
-        
+    
+    
 
-# input_layer = Input(shape=target_size)
-# conv_layer = input_layer
-# for _ in range(3):
-      
-#     conv_layer = Conv2D(filters=32, kernel_size=3, strides=1, padding="same")(conv_layer)
-#     conv_layer = Activation("tanh")(conv_layer)
-
-# conv_layer = Flatten()(conv_layer)
-# output_layer = Dense(units=10, activation="softmax")(conv_layer)
-# model = Model(inputs=input_layer, outputs=output_layer)
-# model.compile(optimizer="adam", loss="categorical_crossentropy")
-
-
-
-
-
+    
