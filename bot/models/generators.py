@@ -117,11 +117,12 @@ class ImageGenerator:
 
 class TextMelGenerator:
 
-    def __init__(self, data_path, batch_size=None) -> None:
+    def __init__(self, data_path, batch_size=None, max_mel_len=480) -> None:
         
         self.data_path = data_path
         self.batch_size = batch_size
-    
+        self.max_mel_len = max_mel_len
+
     def __iter__(self):
 
         while True:
@@ -161,11 +162,30 @@ class TextMelGenerator:
 
                     wave, sr = ls.load(curent_file)
                     mel = mel_s(y=wave, sr=sr)
+                    
+                    if mel.shape[1] > self.max_mel_len:
+                        mel = mel[:, :self.max_mel_len]
+                    
+                    else:
+                        
+                        tmp_mel = np.zeros((mel.shape[0], self.max_mel_len))
+                        value_index = 0
+                        mel_value_index = 0
+                        while value_index < tmp_mel.shape[1]:
+                            
+                            if mel_value_index == mel.shape[1]:
+                                mel_value_index = 0
+
+                            tmp_mel[:, value_index] = mel[:, mel_value_index]
+                            value_index += 1
+                            mel_value_index += 1
+                        
+                        mel = tmp_mel
         
         else:
 
             text = ""
-            mel = np.zeros((128, 128))
+            mel = np.zeros((128, self.max_mel_len))
         
         return (text, mel)
 
@@ -228,24 +248,11 @@ class TextMelGenerator:
                 sample["text"].append(text)
                 sample["mel_sp"].append(mel)
                 
-
-
-        max_len = max([mel_sp.shape[1] for mel_sp in sample["mel_sp"]])
-        for (sample_n, sample_mel_sp) in enumerate(sample["mel_sp"]):
-
-            tmp_mel_sp = np.zeros(shape=(sample_mel_sp.shape[0], max_len))
-            tmp_mel_sp[:, :sample_mel_sp.shape[1]] = sample_mel_sp
-            sample["mel_sp"][sample_n] = tmp_mel_sp
-
         sample["mel_sp"] = np.asarray(sample["mel_sp"], dtype="float")
         return sample
 
 
-if __name__ == "__main__":
 
-    text_generator = TextMelGenerator(data_path="c:\\Users\\1\\Desktop\\dev-clean", batch_size=32)
-    for sample in iter(text_generator):
-        print(sample["mel_sp"].shape)
     
 
   

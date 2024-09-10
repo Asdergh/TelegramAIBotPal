@@ -124,7 +124,7 @@ class VarEncoder:
         self.model = Model(model_input_layer, model_output_layer)
         self.model.compile(loss="mse", metrics=["mae"], optimizer=RMSprop(learning_rate=0.01))
     
-    def train(self, run_folder, train_tensor, train_labels, epochs, batch_size, epoch_per_save):
+    def train(self, run_folder, train_tensor, train_labels, epochs, batch_size, epoch_per_save, gen_encoded_sample=False):
 
         
         run_folder = run_folder
@@ -143,8 +143,10 @@ class VarEncoder:
             
             self.epoch_iterator += 1
         
-        hiden_dim_json = os.path.join(run_folder, "hiden_dim_storage.json")
-        self.generate_encoded_dim(data_tensor=train_tensor, general_labels=train_labels, hiden_dim_json=hiden_dim_json)
+        if gen_encoded_sample:
+            hiden_dim_json = os.path.join(run_folder, "hiden_dim_storage.json")
+            self.generate_encoded_dim(data_tensor=train_tensor, general_labels=train_labels, hiden_dim_json=hiden_dim_json)
+
         self.model.save_weights(filepath=entire_model_weights_folder)
 
     
@@ -199,11 +201,15 @@ class VarEncoder:
                     
                     if not (self.params_json["input_shape"][-1] == 1):
                         show_tensor[i * self.params_json["input_shape"][0]: (i + 1) * self.params_json["input_shape"][0],
-                                    j * self.params_json["input_shape"][0]: (j + 1) * self.params_json["input_shape"][1], :] = decoded_images[sample_number]
+                                    j * self.params_json["input_shape"][1]: (j + 1) * self.params_json["input_shape"][1], :] = decoded_images[sample_number]
                     
                     else:
+                        
+                        curent_sample = decoded_images[sample_number]
+                        curent_sample = np.squeeze(curent_sample, axis=2)
+                       
                         show_tensor[i * self.params_json["input_shape"][0]: (i + 1) * self.params_json["input_shape"][0],
-                                    j * self.params_json["input_shape"][0]: (j + 1) * self.params_json["input_shape"][1]] = decoded_images[sample_number]
+                                    j * self.params_json["input_shape"][1]: (j + 1) * self.params_json["input_shape"][1]] = curent_sample
 
                     sample_number += 1
 
