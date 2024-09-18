@@ -4,72 +4,196 @@ import json as js
 import os
 import tensorflow.keras.backend as K
 
-from layers import *
-from tensorflow.keras.layers import Input, Dense, Activation, Reshape, LayerNormalization, BatchNormalization, Add
-from tensorflow.keras.layers import LSTM, GRU, Masking, Bidirectional, Dropout, Conv2D, Conv2DTranspose, Flatten
-from tensorflow.keras.layers import Concatenate, Lambda, Embedding, Multiply, Layer, Conv1D, Attention, RepeatVector
+
+from tensorflow.keras.layers import Input, Dense, Activation, Reshape, LayerNormalization, BatchNormalization, Add, Conv3D, Conv3DTranspose, MaxPool2D
+from tensorflow.keras.layers import LSTM, GRU, Masking, Bidirectional, Dropout, Conv2D, Conv2DTranspose, Flatten, Conv1D, MaxPool1D
+from tensorflow.keras.layers import Concatenate, Lambda, Embedding, Multiply, Layer, Conv1D, Attention, RepeatVector, Conv1DTranspose, MaxPool3D
 from tensorflow.keras.losses import SparseCategoricalCrossentropy, CategoricalCrossentropy
 from tensorflow.keras.optimizers import RMSprop, Adam
-from tensorflow.keras import Model
+from tensorflow.keras import Model, Sequential
 from tensorflow.keras.utils import to_categorical
 from tensorflow.random import categorical
 from tensorflow import map_fn, expand_dims, convert_to_tensor
 from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.initializers import RandomNormal
+from tensorflow.keras.initializers import RandomNormal, RandomUniform
 
-class ConvSequence(Layer):
 
-    def __init__(self, units, samples_n, sequence_l):
 
-        super(ConvSequence, self).__init__()
-        self.units = units
-        self.samples_n = samples_n
-        self.sequence_l = sequence_l
+def __norm_and_dropout__(layer, norm_params):
     
-    def call(self, input_layer):
-        
-        layer = Flatten()(input_layer)
-        layer = Dense(units=self.units, activation="softmax")(layer)    
-        return layer
+    normalized_layer = Sequential(layers=[
+        layer,
+        Dropout(rate=norm_params[0]),
+        LayerNormalization(epsilon=norm_params[1])
+    ])
+
+    return normalized_layer
+
     
-    def compute_output_shape(self):
-        return (None, None, self.units)
+def __get_weights_initializer__(layer, weights_params):
+        
 
-class WaveNetLayer(Layer):
+        init_type = weights_params["init_type"]
+        params = weights_params["params"]
 
-    def __init__(self, filters, kernel_size, output_dim, max_seq_len=1):
+        if init_type == "random_normal":
+            weights_init = RandomNormal(mean=params["mean"], stddev=params["stddev"])
+            
+        elif init_type == "random_uniform":
+            weights_init = RandomUniform(minval=params["min_val"], maxval=params["max_val"])
+            
+        layer.kernel_initializer = weights_init
 
-        super(WaveNetLayer, self).__init__()
-        self.filters = filters
-        self.kernel_size = kernel_size
-        self.output_dim = output_dim
-        self.max_sequence_lenght = max_seq_len
-        self.padding = "causal"
 
-        self.conv_dialation_layer = Conv1D(filters=self.filters, kernel_size=self.kernel_size, padding=self.padding)
-        self.tanh_layer = Activation("tanh")
-        self.sigma_layer = Activation("sigmoid")
-        self.gate_layer = Multiply()
-        self.flatten_layer = Flatten()
-        self.dense_layer = Dense(units=self.output_dim, activation="softmax")
-        if self.max_sequence_lenght != 1:
-            self.repeat_layer = RepeatVector(n=self.max_sequence_lenght)
+def __linear_layer__(params, weights_params, layer_n=0, norm_params=None):
+
+    linear_layer = Dense(units=params["units"][layer_n], activation=params["activations"][layer_n])
+    if weights_params is not None:
+        __get_weights_initializer__(layer=linear_layer, weights_params=weights_params)
     
-    def call(self, input_layer):
-        
-        layer = self.conv_dialation_layer(input_layer)
-        gate_tanh_layer = self.tanh_layer(layer)
-        gate_sigma_layer = self.sigma_layer(layer)
-        
-        gate_layer = self.gate_layer([gate_tanh_layer, gate_sigma_layer])
-        flatten_layer = self.flatten_layer(gate_layer)
+    if norm_params is not None:
+       linear_layer = __norm_and_dropout__(norm_params=norm_params)
 
-        dense_layer = self.dense_layer(flatten_layer)
-        if self.max_sequence_lenght != 1:
-            dense_layer =  self.repeat_layer(dense_layer)
-
-        return dense_layer
+    return linear_layer
         
-    def compute_output_shape(self, input_shape):
-        return (input_shape[0], self.output_dim)
 
+def __conv1d_layer__(params, weights_params, layer_n=0, norm_params=None):
+        
+    conv_layer = Conv1D(filters=params["filters"][layer_n], kernel_size=params["kernel_size"][layer_n], strides=params["strides"][layer_n], padding=params["padding"][layer_n])
+    if weights_params is not None:
+        __get_weights_initializer__(layer=conv_layer, weights_params=weights_params) 
+    
+    conv_layer = Sequential(layers=[conv_layer, Activation(params["activations"][layer_n])])
+    if "polling" in params.keys():
+        if params["pooling"][layer_n]:
+
+            conv_layer = Sequential(layers=[conv_layer, MaxPool1D(pool_size=params["pooling_size"])])
+        
+    
+        
+    if norm_params is not None:
+        conv_layer = __norm_and_dropout__(norm_params=norm_params)
+
+    return conv_layer
+    
+
+def __conv2d_layer__(params, weights_params, layer_n=0, norm_params=None):
+        
+    conv_layer = Conv2D(filters=params["filters"][layer_n], kernel_size=params["kernel_size"][layer_n], strides=params["strides"][layer_n], padding=params["padding"][layer_n])
+    if weights_params is not None:
+        __get_weights_initializer__(layer=conv_layer, weights_params=weights_params) 
+
+
+    conv_layer = Sequential(layers=[conv_layer, Activation(params["activations"][layer_n])])
+    if "polling" in params.keys():
+        if params["pooling"][layer_n]:
+
+            conv_layer = Sequential(layers=[conv_layer, MaxPool2D(pool_size=params["pooling_size"])])
+
+    if norm_params is not None:
+        conv_layer = __norm_and_dropout__(norm_params=norm_params)
+    
+    return conv_layer
+    
+
+def __conv3d_layer__(params, weights_params, layer_n=0, norm_params=None):
+        
+    conv_layer = Conv3D(filters=params["filters"][layer_n], kernel_size=params["kernel_size"][layer_n], strides=params["strides"][layer_n], padding=params["padding"][layer_n])
+    if weights_params is not None:
+        __get_weights_initializer__(layer=conv_layer, weights_params=weights_params) 
+
+    
+        conv_layer = Sequential(layers=[conv_layer, Activation(params["activations"][layer_n])])
+    if "polling" in params.keys():
+        if params["pooling"][layer_n]:
+
+            conv_layer = Sequential(layers=[conv_layer, MaxPool3D(pool_size=params["pooling_size"])])
+
+    if norm_params is not None:
+        conv_layer = __norm_and_dropout__(norm_params=norm_params)
+
+    return conv_layer
+
+
+def __conv1d_transpose_layer__(params, weights_params, layer_n=0, norm_params=None):
+        
+    conv_layer = Conv1DTranspose(filters=params["filters"][layer_n], kernel_size=params["kernel_size"][layer_n], strides=params["strides"][layer_n], padding=params["padding"][layer_n])
+    if weights_params is not None:
+        __get_weights_initializer__(layer=conv_layer, weights_params=weights_params) 
+
+    
+    conv_layer = Sequential(layers=[conv_layer, Activation(params["activations"][layer_n])])
+    if "polling" in params.keys():
+        if params["pooling"][layer_n]:
+
+            conv_layer = Sequential(layers=[conv_layer, MaxPool1D(pool_size=params["pooling_size"])])
+        
+    
+    if norm_params is not None:
+        conv_layer = __norm_and_dropout__(norm_params=norm_params)
+
+    return conv_layer
+    
+
+def __conv2d_transpose_layer__(params, weights_params, layer_n=0, norm_params=None):
+        
+    conv_layer = Conv2DTranspose(filters=params["filters"][layer_n], kernel_size=params["kernel_size"][layer_n], strides=params["strides"][layer_n], padding=params["padding"][layer_n])
+    if weights_params is not None:
+        __get_weights_initializer__(layer=conv_layer, weights_params=weights_params) 
+
+    conv_layer = Sequential(layers=[conv_layer, Activation(params["activations"][layer_n])])
+    if "polling" in params.keys():
+        if params["pooling"][layer_n]:
+
+            conv_layer = Sequential(layers=[conv_layer, MaxPool2D(pool_size=params["pooling_size"])])
+
+    if norm_params is not None:
+        conv_layer = __norm_and_dropout__(norm_params=norm_params)
+
+    return conv_layer
+    
+
+def __conv3d_transpose_layer__(params, weights_params, layer_n=0, norm_params=None):
+        
+    conv_layer = Conv3DTranspose(filters=params["filters"][layer_n], kernel_size=params["kernel_size"][layer_n], strides=params["strides"][layer_n], padding=params["padding"][layer_n])
+    if weights_params is not None:
+        __get_weights_initializer__(layer=conv_layer, weights_params=weights_params) 
+
+        conv_layer = Sequential(layers=[conv_layer, Activation(params["activations"][layer_n])])
+    if "polling" in params.keys():
+        if params["pooling"][layer_n]:
+
+            conv_layer = Sequential(layers=[conv_layer, MaxPool3D(pool_size=params["pooling_size"])])
+
+    if norm_params is not None:
+        conv_layer = __norm_and_dropout__(norm_params=norm_params)
+
+    return conv_layer
+
+
+def __lstm_layer__(params, layer_n=0, norm_params=None, layers_n=1):
+
+    
+    if layers_n != 1:
+
+        if layer_n == layers_n - 1:
+            rq = params["return_sequences"]
+        
+        else:
+            rq = True
+    
+    else:
+        rq = params["return_sequences"]
+
+
+    lstm_layer = LSTM(units=params["units"][layer_n], return_sequences=rq)    
+    if params["bi"][layer_n]:
+            lstm_layer = Bidirectional(lstm_layer)
+                
+    lstm_layer = Sequential(layers=[lstm_layer, Activation(params["activations"][layer_n])])
+    if norm_params is not None:
+        lstm_layer = __norm_and_dropout__(norm_params=norm_params)
+    
+    
+
+    return lstm_layer

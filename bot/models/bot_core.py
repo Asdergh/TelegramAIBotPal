@@ -7,9 +7,9 @@ import tensorflow.keras.backend as K
 
 from PIL import Image
 from matplotlib.animation import FuncAnimation
-from models.conv_var_ae import VarEncoder
-from models.rnn import RNN
-from models.rnn_ae import RNN_AE
+from conv_var_ae import VarEncoder
+from rnn import RNN
+from rnn_ae import RNN_AE
 from matplotlib.animation import FuncAnimation
 from telegram.ext import Application, filters, ContextTypes
 from telegram.ext import MessageHandler, CommandHandler
@@ -35,19 +35,35 @@ class BotCore:
         self.app_builder.token("7405563731:AAHhDPtAHWXzi-ZCRh-F-uWMBtBZSyrv3gg")
         self.application = self.app_builder.build()
 
-        self.start_handler = CommandHandler(command="start", callback=self.show_functional)
-        self.images_handler = MessageHandler(filters=filters.PHOTO, callback=self.save_image)
-        self.voice_handler = MessageHandler(filters=filters.VOICE, callback=self.save_image)
-        self.text_handler = MessageHandler(filters=filters.TEXT, callback=self.emotion_classification)
-        
-        
-        all_handlers = [self.start_handler, self.images_handler, self.voice_handler, self.text_handler]
+        self.message_handler = MessageHandler(filters=filters.TEXT, callback=self.__msg_answer__)
+        self.image_handler = MessageHandler(filters=filters.CAPTION, callback=self.__image_generation__)
+                
+        all_handlers = [self.message_handler, self.image_handler]
         for handler in all_handlers:
             self.application.add_handler(handler)
         self.application.run_polling(poll_interval=3)
         
         
     
+    
+    async def __image_generation__(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        pass
+
+    async def __msg_answer__(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        msg = update.message.text
+        print(msg)
+        msg_reply = self.__handle_text_msg__(msg=msg)
+        print(msg_reply)
+        await update.message.reply_text(msg_reply)
+
+
+    def __handle_text_msg__(self, msg):
+
+        self.rnn_ae_model.expand_tokenizer(new_words=msg, model_type="encoder")
+        self.rnn_ae_model.expand_tokenizer(new_words=msg, model_type="decoder")
+        reply_msg = self.rnn_ae_model.generate_sequence(input_question=msg, sequence_len=100, target_sequence_len=100)
+        return reply_msg
     
     def _generate_reaction_img_(self, emotion_cll):
         
@@ -84,54 +100,9 @@ class BotCore:
             images.append(image)
         
         images[0].save(self.gif_path, save_all=True, append_images=images, optimize=False, duration=100, loop=0)
-        
-            
-            
-    def _generate_answer(self, msg):
-
-        
-        self.seq2em_model.expand_tokenizer(new_words=msg.split())
-        self.rnn_ae_model.expand_tokenizer(new_words=msg.split())
-
-        classification_tokens = self.seq2em_model.tokenizer.texts_to_sequences([msg.split()])[0]
-        classification_tokens = np.expand_dims(np.asarray(classification_tokens, dtype="int64"), axis=0)
-        
-        emotion_label = np.argmax(self.seq2em_model.model.predict(classification_tokens)[0])
-        emotion_cll = self.seq2em_model.rnn_params["classes_discription"][str(emotion_label)]
-        
-        encoder_input = self.rnn_ae_model.encoder_tokenizer.texts_to_sequences([msg])[0]
-        encoder_input = np.asarray(encoder_input)
-        print(encoder_input.shape)
-        #answer_msg = self.rnn_ae_model.generate_sequence(input_question=msg, sequence_len=100, target_sequence_len=40)
-        
-        return (emotion_cll, answer_msg)
     
+   
 
-    async def emotion_classification (self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
-        message_text = update.message.text
-        emotion_cll, generated_answer = self._generate_answer(msg=message_text)
-        self._generate_reaction_img_(emotion_cll=emotion_cll)
-
-        await update.message.reply_text(f"Well as i can see you are in {emotion_cll} mood." + generated_answer)
-        await update.message.reply_animation(animation=open(self.gif_path, "rb"))
-
-
-    async def show_functional(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Hello world")
-    
-    async def save_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        
-        image_number = len(os.listdir(self.images_handler)) + 1
-        image_path = os.path.join(self.saved_images_folder, f"image{image_number}.png")
-        
-        image = await update.message.effective_attachment[-1].get_file()
-        await update.message.d
-    
-    async def save_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        pass
-        
-    
     
 if __name__ == "__main__":
     bot = BotCore()

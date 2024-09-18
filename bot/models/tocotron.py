@@ -108,7 +108,7 @@ class Tocotron:
         
         for layer_n in range(len(decoder_params["filters"])):
 
-            conv_layer = Conv1D(filters=decoder_params["filters"][layer_n], kernel_size=decoder_params["kernel_size"][layer_n],
+            conv_layer = Conv2D(filters=1, kernel_size=decoder_params["kernel_size"][layer_n],
                                 padding=decoder_params["padding"][layer_n], strides=decoder_params["strides"][layer_n])(conv_layer)
             
             conv_layer = Sequential(layers=[Activation(decoder_params["activations"][layer_n]),
