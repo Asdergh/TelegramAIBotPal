@@ -252,7 +252,84 @@ class TextMelGenerator:
         return sample
 
 
+class StyleTransferGenerator:
 
+    def __init__(self, data_path=None, target_size=(128, 128), random_normal=False, batch_size=None):
+
+        self.data_path = data_path
+        self.target_size = target_size
+        self.random_normal = random_normal
+        self.batch_size = batch_size
+    
+    def __one_sample__(self):
+
+        styles_folder = os.path.join(self.data_path, "styles")
+        images_folder = os.path.join(self.data_path, "images")
+        
+        sample_image = rd.sample(os.listdir(images_folder))
+        sample_style = rd.sample(os.listdir(styles_folder))
+
+        image = cv2.imread(sample_image)
+        image = cv2.resize(image, self.target_size)
+
+        style = cv2.imread(sample_style)
+        style = cv2.resize(style, self.target_size)
+
+        return (image, style) 
+
+    def __batch_sample__(self):
+
+        styles_folder = os.path.join(self.data_path, "styles")
+        images_folder = os.path.join(self.data_path, "images")
+        
+        sample_images = rd.sample(os.listdir(images_folder), self.batch_size)
+        sample_styles = rd.sample(os.listdir(styles_folder), self.batch_size)
+
+        images = []
+        styles = []
+        for (image_path, style_path) in zip(sample_images, sample_styles):
+
+            image_path = os.path.join(images_folder, image_path)
+            style_path = os.path.join(styles_folder, style_path)
+
+            image = cv2.imread(image_path)
+            style = cv2.imread(style_path)
+
+            image = cv2.resize(image, self.target_size)
+            style = cv2.resize(style, self.target_size)
+            
+            images.append(image)
+            styles.append(style)
+        
+        images = np.asarray(images)
+        styles = np.asarray(styles)
+        
+        return (images, styles)
+
+    def __iter__(self):
+
+        while True:
+            
+            if self.batch_size is None:
+                sample = self.__one_sample__()
+            
+            else:
+                sample = self.__batch_sample__()
+            
+            yield sample
+
+    def __next__(self):
+
+        if self.batch_size is None:
+            sample = self.__one_sample__()
+            
+        else:
+            sample = self.__batch_sample__()
+            
+        return sample
+
+        
+            
     
 
   

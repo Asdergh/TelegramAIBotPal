@@ -1,0 +1,1 @@
+{"input_shape": [256, 256, 3], "discriminator_params": {"filters": [128, 64, 32], "kernel_size": [3, 3, 3], "strides": [2, 2, 2], "activation": ["tanh", "tanh", "tanh"]}, "generator_params": {"filters_n": 32}}
