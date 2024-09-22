@@ -1,1 +1,1 @@
-{"input_shape": [256, 256, 3], "discriminator_params": {"filters": [128, 64, 32], "kernel_size": [3, 3, 3], "strides": [2, 2, 2], "activation": ["tanh", "tanh", "tanh"]}, "generator_params": {"filters_n": 32}}
+{"run_folder": "c:\\Users\\1\\Desktop\\models_save\\TEST_CycleGAN", "input_shape": [128, 128, 3], "discriminator_params": {"filters_n": 32, "layers_n": 3, "last_activation": "sigmoid"}, "generator_params": {"filters_n": 32, "down_activation": "tanh", "up_activation": "tanh", "last_activation": "tanh"}}

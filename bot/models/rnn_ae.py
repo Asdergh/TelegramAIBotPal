@@ -4,7 +4,7 @@ import json as js
 import random as rd
 import os 
 
-from layers_block import LayersBlock
+from bot.models.block import LayersBlock
 from tensorflow.keras.layers import Input, Dense, Activation, LayerNormalization, Dropout
 from tensorflow.keras.layers import Embedding, LSTM, Bidirectional, GRU, Attention
 from tensorflow.keras.losses import CategoricalCrossentropy, SparseCategoricalCrossentropy

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import json as js
 import os
 
-from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose, LayerNormalization, Layer
+from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose, LayerNormalization, Layer, Dropout, Multiply
 from tensorflow.keras.layers import Dense, Flatten, UpSampling2D, Activation, Add, Concatenate, Normalization
 from tensorflow.keras.initializers import RandomNormal
 from tensorflow.keras import Model
@@ -12,12 +12,14 @@ from tensorflow.keras import Model
 
 class DownConvLayer(Layer):
 
-    def __init__(self, filters, init, kernel_size=4):
+    def __init__(self, filters, init, kernel_size=4, activation="tanh", strides=2, dropout_rate=0.76):
 
-        conv_layer = Conv2D(filters=filters, kernel_size=kernel_size, padding="same", strides=2, kernel_initializer=init)
+        conv_layer = Conv2D(filters=filters, kernel_size=kernel_size, padding="same", strides=strides, kernel_initializer=init)
         norm_layer = Normalization(axis=-1, mean=None, variance=None, invert=False)
-        activation_layer = Activation("tanh")
-        self.layers = [conv_layer, norm_layer, activation_layer]
+        dropout_layer = Dropout(rate=dropout_rate)
+        activation_layer = Activation(activation=activation)
+
+        self.layers = [conv_layer, activation_layer, norm_layer, dropout_layer]
     
     def __call__(self, input_layer):
         
@@ -29,13 +31,16 @@ class DownConvLayer(Layer):
     
 class UpConvLayer(Layer):
 
-    def __init__(self, filters, init, kernel_size=4):
+    def __init__(self, filters, init, kernel_size=4, activation="tanh", strides=1, dropout_rate=0.76):
 
         up_layer = UpSampling2D(size=2)
-        conv_layer = Conv2D(filters=filters, padding="same", kernel_size=kernel_size, strides=1, kernel_initializer=init)
-        activation_layer = Activation("tanh")
-        concatenate_layer = Concatenate()
-        self.layers = [up_layer, conv_layer, activation_layer, concatenate_layer]
+        conv_layer = Conv2D(filters=filters, padding="same", kernel_size=kernel_size, strides=strides, kernel_initializer=init)
+        norm_layer = Normalization(axis=-1, mean=None, variance=None, invert=False)
+        dropout_layer = Dropout(rate=dropout_rate)
+        activation_layer = Activation(activation=activation)
+        mul_layer = Multiply()
+
+        self.layers = [up_layer, conv_layer, activation_layer, norm_layer, dropout_layer, mul_layer]
     
     def __call__(self, inputs):
         
@@ -62,6 +67,8 @@ class CycleGAN():
         self.__save_params__()
 
         self.input_shape = self.params_json["input_shape"]
+        self.dis_prob_patch = (int(self.input_shape[0] // (2 ** self.params_json["discriminator_params"]["layers_n"])),  
+                              int(self.input_shape[1] // (2 ** self.params_json["discriminator_params"]["layers_n"])), 1)
         self.weights_init = RandomNormal(mean=2.1, stddev=3.98)
         self.dis_learning_history = []
         self.gen_learning_history = []
@@ -88,41 +95,49 @@ class CycleGAN():
     def __build_discriminator__(self):
 
         dis_params = self.params_json["discriminator_params"]
+        filters_n = dis_params["filters_n"]
+        layers_n = dis_params["layers_n"]
+        last_activation = dis_params["last_activation"]
+
         input_layer = Input(shape=self.input_shape)
-        conv_layer = input_layer
+        conv_layer = DownConvLayer(filters=filters_n, activation="tanh", init=self.weights_init)(input_layer)
+        for layer_n in range(layers_n):
+            
+            if layer_n == (layers_n - 1):
+                conv_layer = DownConvLayer(filters=filters_n, activation="tanh", init=self.weights_init, strides=1)(conv_layer)
+            
+            else:
+                conv_layer = DownConvLayer(filters=filters_n, activation="tanh", init=self.weights_init)(conv_layer)
 
-        for layer_n in range(len(dis_params["filters"])):
+            filters_n *= 2
+        
+        output_layer = Conv2D(filters=1, kernel_size=4, strides=1, padding="same")(conv_layer)
+        output_layer = Activation(last_activation)(output_layer)
 
-            conv_layer = Conv2D(filters=dis_params["filters"][layer_n], kernel_size=dis_params["kernel_size"][layer_n], strides=dis_params["strides"][layer_n], padding="same",
-                                kernel_initializer=self.weights_init)(conv_layer)
-            conv_layer = Activation(dis_params["activation"][layer_n])(conv_layer)
-            conv_layer = LayerNormalization()(conv_layer)
-
-        flatten_layer = Flatten()(conv_layer)
-        output_layer = Dense(units=1, activation="sigmoid")(flatten_layer)
         discriminator = Model(inputs=input_layer, outputs=output_layer)
-
         return discriminator
-
-    
+        
 
     def __build_generator_unet__(self):
         
         filters = self.params_json["generator_params"]["filters_n"]
+        down_activation = self.params_json["generator_params"]["down_activation"]
+        up_activation = self.params_json["generator_params"]["down_activation"]
+        last_activation = self.params_json["generator_params"]["last_activation"]
     
         input_layer = Input(shape=self.input_shape)
-        down_layer_0 = DownConvLayer(filters=filters, init=self.weights_init)(input_layer)
-        down_layer_1 = DownConvLayer(filters=filters * 2, init=self.weights_init)(down_layer_0)
-        down_layer_2 = DownConvLayer(filters=filters * 4, init=self.weights_init)(down_layer_1)
-        down_layer_3 = DownConvLayer(filters=filters * 8, init=self.weights_init)(down_layer_2)
+        down_layer_0 = DownConvLayer(filters=filters, init=self.weights_init, activation=down_activation)(input_layer)
+        down_layer_1 = DownConvLayer(filters=filters * 2, init=self.weights_init, activation=down_activation)(down_layer_0)
+        down_layer_2 = DownConvLayer(filters=filters * 4, init=self.weights_init, activation=down_activation)(down_layer_1)
+        down_layer_3 = DownConvLayer(filters=filters * 8, init=self.weights_init, activation=down_activation)(down_layer_2)
 
-        up_layer_0 = UpConvLayer(filters=filters * 4, init=self.weights_init)([down_layer_3, down_layer_2])
-        up_layer_1 = UpConvLayer(filters=filters * 2, init=self.weights_init)([up_layer_0, down_layer_1])
-        up_layer_2 = UpConvLayer(filters=filters, init=self.weights_init)([up_layer_1, down_layer_0])
+        up_layer_0 = UpConvLayer(filters=filters * 4, init=self.weights_init, activation=up_activation)([down_layer_3, down_layer_2])
+        up_layer_1 = UpConvLayer(filters=filters * 2, init=self.weights_init, activation=up_activation)([up_layer_0, down_layer_1])
+        up_layer_2 = UpConvLayer(filters=filters, init=self.weights_init, activation=up_activation)([up_layer_1, down_layer_0])
 
         up_layer_3 = UpSampling2D(size=2)(up_layer_2)
         up_layer_3 = Conv2D(filters=self.input_shape[-1], kernel_size=4, padding="same", strides=1, kernel_initializer=self.weights_init)(up_layer_3)
-        output_layer = Activation("tanh")(up_layer_3)
+        output_layer = Activation(last_activation)(up_layer_3)
 
         generator = Model(inputs=input_layer, outputs=output_layer)
         return generator
@@ -169,8 +184,8 @@ class CycleGAN():
     
     def __train_discriminator__(self, images_A, images_B, batch_size):
 
-        valid = np.ones(batch_size)
-        fake = np.zeros(batch_size)
+        valid = np.ones((batch_size, ) + self.dis_prob_patch)
+        fake = np.zeros((batch_size, ) + self.dis_prob_patch)
 
         fake_A = self.generator_A.predict(images_B)
         fake_B = self.generator_B.predict(images_A)
@@ -192,7 +207,7 @@ class CycleGAN():
     
     def __train_generator__(self, images_A, images_B, batch_size):
 
-        valid = np.ones(batch_size)
+        valid = np.ones((batch_size, ) + self.dis_prob_patch)
         return self.model.train_on_batch([images_A, images_B], [valid, valid,
                                                                 images_A, images_B,
                                                                 images_B, images_B])
@@ -218,8 +233,6 @@ class CycleGAN():
         rec_B = self.generator_B.predict(gen_fake_A)
         
         gen_samples = [gen_fake_A, gen_fake_B, rec_A, rec_B]
-        sample_number = 0
-
         for (samples_n, samples) in enumerate(gen_samples):
             for (sample_n, sample) in enumerate(samples):
                 
