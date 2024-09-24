@@ -23,13 +23,12 @@ Bot application scheme (only first test look):
 ![Диаграмма без названия drawio (2)](https://github.com/user-attachments/assets/6c987593-6648-4e0d-a7c6-647d7f22f973)
 
 . Ai api:
-
-  . Models module contain all models that take place in analization processes of the bot
-  . Custom Callbacks is a module with custom callbakcs for models trainig processes analization 
-  . Layer is a module with custom layers for models in Models module 
+  1. Models module contain all models that take place in analization processes of the bot
+  2. Custom Callbacks is a module with custom callbakcs for models trainig processes analization 
+  3. Layer is a module with custom layers for models in Models module 
 
 . Bot Api:
-  . For know i have only basic telegram bot api realizatio to send messages, analize them. Also i have write some function to handle request realeted with AI tasks
+  1. For know i have only basic telegram bot api realizatio to send messages, analize them. Also i have write some function to handle request realeted with AI tasks
     such as images NST task, image generation task. I will add some features and little functionality to manipulate with my bot and make own applications based on 
     requests to my bot :)
 
