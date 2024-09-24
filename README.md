@@ -17,3 +17,7 @@ Next probable possibilities (depends on work speed):
   1. Automatize your work env with my bot
   2. Automatize your chats workspace with my bot
   3. Possiblly i will add web version
+
+Bot application scheme (only first test look):
+  ![Диаграмма без названия drawio (2)](https://github.com/user-attachments/assets/6c987593-6648-4e0d-a7c6-647d7f22f973)
+
